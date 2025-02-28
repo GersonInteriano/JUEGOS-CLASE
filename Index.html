@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Snake Fluido con Power Up - Móvil</title>
+  <style>
+    body { margin: 0; background: #000; }
+    #gameContainer {
+      position: relative;
+      text-align: center;
+      max-width: 600px;
+      margin: auto;
+    }
+    canvas {
+      display: block;
+      background: #000;
+      width: 100%;
+      height: auto;
+      touch-action: none; /* Evita el zoom y el scroll en móviles */
+    }
+    #gameOverOverlay {
+      display: none;
+      position: absolute;
+      top: 40%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: #fff;
+      font-size: 30px;
+      pointer-events: none;
+    }
+    #restartBtn {
+      display: none;
+      position: absolute;
+      top: 60%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      padding: 10px 20px;
+      font-size: 20px;
+      background-color: #fff;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div id="gameContainer">
+    <canvas id="gameCanvas" width="600" height="400"></canvas>
+    <div id="gameOverOverlay">Game Over</div>
+    <button id="restartBtn">Volver a Intentar</button>
+  </div>
+  <script>
+    // Configuración del canvas y la cuadrícula
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const gridSize = 20;
+    const canvasWidth = canvas.width;
+    const canvasHeight = canvas.height;
+    const columns = canvasWidth / gridSize;
+    const rows = canvasHeight / gridSize;
+
+    // Imágenes para la serpiente, alimento pequeño y fondo
+    const snakeImg = new Image();
+    snakeImg.src = "https://i.postimg.cc/T1gsythk/unnamed-1.png";
+    const foodImg = new Image();
+    foodImg.src = "https://i.postimg.cc/Xv2631yd/unnamed.png";
+    const bgImg = new Image();
+    bgImg.src = "https://cdn.tutsplus.com/cdn-cgi/image/width=480/mobile/uploads/legacy/Corona-SDK_Build-A-Snake-Game/1/6.png";
+
+    // Variables de la lógica del juego
+    let snake = [];           // Posiciones en la cuadrícula
+    let snakeOld = [];        // Posiciones previas (en píxeles) para interpolar
+    let direction = { x: 1, y: 0 };
+    let smallFood;
+    let bigFood = null;
+    let speedUpFood = null;   // Power up de velocidad
+    let smallFoodCounter = 0;
+    let growSegments = 0;
+    let tickCount = 0;
+    let gameOver = false;
+
+    // Variables para la animación fluida y velocidad
+    const baseCellDuration = 200; // ms por celda en estado normal
+    let accumulator = 0;
+    let lastTime = performance.now();
+    let speedUpTimer = 0;         // Tiempo restante (en ms) para que el power up de velocidad esté activo
+    const speedUpDuration = 5000; // Duración del efecto de velocidad (5 segundos)
+
+    // Elementos DOM para Game Over y reinicio
+    const gameOverOverlay = document.getElementById('gameOverOverlay');
+    const restartBtn = document.getElementById('restartBtn');
+
+    // Inicializa (o reinicia) el juego
+    function initGame() {
+      snake = [];
+      snake.push({ x: Math.floor(columns/2), y: Math.floor(rows/2) });
+      snakeOld = snake.map(segment => ({ x: segment.x * gridSize, y: segment.y * gridSize }));
+      direction = { x: 1, y: 0 };
+      smallFoodCounter = 0;
+      growSegments = 0;
+      tickCount = 0;
+      gameOver = false;
+      smallFood = getRandomFoodPosition();
+      bigFood = null;
+      speedUpFood = null;
+      speedUpTimer = 0;
+      accumulator = 0;
+      lastTime = performance.now();
+      gameOverOverlay.style.display = 'none';
+      restartBtn.style.display = 'none';
+      requestAnimationFrame(gameLoop);
+    }
+
+    // Función para obtener una posición aleatoria en la cuadrícula (sin solaparse con la serpiente)
+    function getRandomFoodPosition() {
+      let pos;
+      do {
+        pos = {
+          x: Math.floor(Math.random() * columns),
+          y: Math.floor(Math.random() * rows)
+        };
+      } while(snake.some(segment => segment.x === pos.x && segment.y === pos.y));
+      return pos;
+    }
+
+    // Función para generar alimento grande
+    function spawnBigFood() {
+      bigFood = getRandomFoodPosition();
+      bigFood.lifetime = 100;
+    }
+
+    // Función para generar el power up de velocidad
+    function spawnSpeedUpFood() {
+      speedUpFood = getRandomFoodPosition();
+      speedUpFood.lifetime = 100;
+    }
+
+    // Actualiza la lógica del juego (movimiento, colisiones, alimentos y power ups)
+    function updateLogic() {
+      tickCount++;
+
+      // Manejo del alimento grande
+      if(bigFood) {
+        bigFood.lifetime--;
+        if(bigFood.lifetime <= 0) bigFood = null;
+      } else {
+        if(tickCount % 300 === 0) spawnBigFood();
+      }
+
+      // Manejo del power up de velocidad
+      if(speedUpFood) {
+        speedUpFood.lifetime--;
+        if(speedUpFood.lifetime <= 0) speedUpFood = null;
+      } else {
+        if(tickCount % 500 === 0) spawnSpeedUpFood();
+      }
+
+      // Guardar posición actual (en píxeles) de la serpiente para interpolación
+      snakeOld = snake.map(segment => ({ x: segment.x * gridSize, y: segment.y * gridSize }));
+
+      const head = snake[0];
+      const newHead = { x: head.x + direction.x, y: head.y + direction.y };
+
+      // Verificar colisiones con el borde
+      if(newHead.x < 0 || newHead.x >= columns || newHead.y < 0 || newHead.y >= rows) {
+        gameOver = true;
+        return;
+      }
+      // Verificar colisiones con el propio cuerpo
+      if(snake.some(segment => segment.x === newHead.x && segment.y === newHead.y)) {
+        gameOver = true;
+        return;
+      }
+
+      snake.unshift(newHead);
+
+      // Comprobar si se comió el alimento pequeño
+      if(newHead.x === smallFood.x && newHead.y === smallFood.y) {
+        smallFoodCounter++;
+        if(smallFoodCounter >= 3) {
+          growSegments++;
+          smallFoodCounter = 0;
+        }
+        smallFood = getRandomFoodPosition();
+      }
+      // Comprobar si se comió el alimento grande
+      else if(bigFood && newHead.x === bigFood.x && newHead.y === bigFood.y) {
+        growSegments += 3;
+        bigFood = null;
+      }
+      // Comprobar si se comió el power up de velocidad
+      else if(speedUpFood && newHead.x === speedUpFood.x && newHead.y === speedUpFood.y) {
+        speedUpTimer = speedUpDuration;  // Activa el efecto de velocidad
+        speedUpFood = null;
+      }
+      else {
+        // Control de crecimiento: si no hay crecimiento pendiente, se elimina la cola
+        if(growSegments > 0) {
+          growSegments--;
+        } else {
+          snake.pop();
+        }
+      }
+    }
+
+    // Renderiza la escena interpolando entre la posición previa y la nueva
+    function render(interp) {
+      // Dibujar fondo
+      ctx.drawImage(bgImg, 0, 0, canvasWidth, canvasHeight);
+
+      // Dibujar la serpiente con interpolación
+      for (let i = 0; i < snake.length; i++) {
+        const newPos = { x: snake[i].x * gridSize, y: snake[i].y * gridSize };
+        const oldPos = snakeOld[i] ? snakeOld[i] : { x: newPos.x, y: newPos.y };
+        const interpX = oldPos.x + (newPos.x - oldPos.x) * interp;
+        const interpY = oldPos.y + (newPos.y - oldPos.y) * interp;
+        ctx.drawImage(snakeImg, interpX, interpY, gridSize, gridSize);
+      }
+
+      // Dibujar el alimento pequeño
+      ctx.drawImage(foodImg, smallFood.x * gridSize, smallFood.y * gridSize, gridSize, gridSize);
+
+      // Dibujar el alimento grande si existe
+      if(bigFood) {
+        const bigSize = gridSize * 1.5;
+        ctx.drawImage(foodImg, bigFood.x * gridSize - (bigSize - gridSize) / 2, bigFood.y * gridSize - (bigSize - gridSize) / 2, bigSize, bigSize);
+      }
+
+      // Dibujar el power up de velocidad (cuadrado naranja)
+      if(speedUpFood) {
+        ctx.fillStyle = "orange";
+        ctx.fillRect(speedUpFood.x * gridSize, speedUpFood.y * gridSize, gridSize, gridSize);
+      }
+    }
+
+    // Bucle de juego usando requestAnimationFrame para una animación fluida
+    function gameLoop(now) {
+      if(gameOver) {
+        gameOverOverlay.style.display = 'block';
+        restartBtn.style.display = 'block';
+        return;
+      }
+      now = now || performance.now();
+      const dt = now - lastTime;
+      lastTime = now;
+      accumulator += dt;
+
+      // Actualizar el temporizador del power up de velocidad
+      if(speedUpTimer > 0) {
+        speedUpTimer = Math.max(speedUpTimer - dt, 0);
+      }
+
+      // Duración efectiva de cada celda: se reduce a la mitad si el power up está activo
+      const effectiveCellDuration = speedUpTimer > 0 ? baseCellDuration / 2 : baseCellDuration;
+
+      while (accumulator >= effectiveCellDuration) {
+        updateLogic();
+        accumulator -= effectiveCellDuration;
+        if(gameOver) break;
+      }
+      const interp = accumulator / effectiveCellDuration;
+      render(interp);
+      requestAnimationFrame(gameLoop);
+    }
+
+    // Control de teclado para cambiar la dirección de la serpiente
+    document.addEventListener("keydown", e => {
+      switch(e.key) {
+        case "ArrowUp":
+          if(direction.y !== 1) direction = { x: 0, y: -1 };
+          break;
+        case "ArrowDown":
+          if(direction.y !== -1) direction = { x: 0, y: 1 };
+          break;
+        case "ArrowLeft":
+          if(direction.x !== 1) direction = { x: -1, y: 0 };
+          break;
+        case "ArrowRight":
+          if(direction.x !== -1) direction = { x: 1, y: 0 };
+          break;
+      }
+    });
+
+    // Soporte para controles táctiles (swipe)
+    let touchStartX = null, touchStartY = null;
+    canvas.addEventListener("touchstart", function(e) {
+      const touch = e.touches[0];
+      touchStartX = touch.clientX;
+      touchStartY = touch.clientY;
+    }, { passive: true });
+
+    canvas.addEventListener("touchend", function(e) {
+      if (touchStartX === null || touchStartY === null) return;
+      const touch = e.changedTouches[0];
+      const dx = touch.clientX - touchStartX;
+      const dy = touch.clientY - touchStartY;
+      const threshold = 20; // píxeles mínimos para considerar el swipe
+      if(Math.abs(dx) > Math.abs(dy)) {
+        // Swipe horizontal
+        if(dx > threshold && direction.x !== -1) {
+          direction = { x: 1, y: 0 };
+        } else if(dx < -threshold && direction.x !== 1) {
+          direction = { x: -1, y: 0 };
+        }
+      } else {
+        // Swipe vertical
+        if(dy > threshold && direction.y !== -1) {
+          direction = { x: 0, y: 1 };
+        } else if(dy < -threshold && direction.y !== 1) {
+          direction = { x: 0, y: -1 };
+        }
+      }
+      touchStartX = null;
+      touchStartY = null;
+    }, { passive: true });
+
+    // Reiniciar el juego al pulsar el botón
+    restartBtn.addEventListener("click", initGame);
+
+    // Iniciar el juego una vez que se carga el fondo
+    bgImg.onload = initGame;
+
+    // Ajustar el canvas de forma responsiva
+    function resizeCanvas() {
+      const container = document.getElementById('gameContainer');
+      const rect = container.getBoundingClientRect();
+      canvas.style.width = rect.width + "px";
+      canvas.style.height = (rect.width * (canvasHeight / canvasWidth)) + "px";
+    }
+    window.addEventListener('resize', resizeCanvas);
+    window.addEventListener('load', resizeCanvas);
+  </script>
+</body>
+</html>
